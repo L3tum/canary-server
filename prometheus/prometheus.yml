@@ -1,0 +1,54 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'asr-server'
+    static_configs:
+      - targets: ['asr-server:8000']
+    metric_relabel_configs:
+      - target_label: model_name
+        replacement: "${MODEL_NAME}"
+      - target_label: model_type
+        replacement: "${MODEL_TYPE}"
+      - target_label: model_task
+        replacement: "${MODEL_TASK}"
+      - target_label: model_size
+        replacement: "${MODEL_SIZE}"
+      - target_label: project
+        replacement: "${PROJECT}"
+      - target_label: replica_id
+        replacement: "${SKYPILOT_SERVE_REPLICA_ID}"
+      - target_label: service
+        replacement: "stt"
+      - target_label: provider
+        replacement: "skypilot"
+      - target_label: cloud
+        replacement: "${CLOUD}"
+      - target_label: tech
+        replacement: "${TECH}"
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    metric_relabel_configs:
+      - target_label: model_name
+        replacement: "${MODEL_NAME}"
+      - target_label: model_type
+        replacement: "${MODEL_TYPE}"
+      - target_label: model_task
+        replacement: "${MODEL_TASK}"
+      - target_label: model_size
+        replacement: "${MODEL_SIZE}"
+      - target_label: project
+        replacement: "${PROJECT}"
+      - target_label: replica_id
+        replacement: "${SKYPILOT_SERVE_REPLICA_ID}"
+      - target_label: service
+        replacement: "node_exporter"
+      - target_label: provider
+        replacement: "skypilot"
+      - target_label: cloud
+        replacement: "${CLOUD}"
+      - target_label: tech
+        replacement: "${TECH}"

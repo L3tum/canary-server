@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemo-openai-asr-server"
+authors = [
+    {name = "NVIDIA", email = "noreply@nvidia.com"},
+]
+description = "OpenAI-compatible ASR server using NVIDIA NeMo"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "nemo_toolkit[asr]>=1.20.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "prometheus-client>=0.17.0",
+    "python-multipart>=0.0.6",
+    "aiofiles>=23.0.0",
+    "soundfile>=0.12.0",
+    "torch>=2.0.0",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/nvidia/nemo-openai-asr-server"
+Repository = "https://github.com/nvidia/nemo-openai-asr-server"
+
+[project.scripts]
+nemo-asr-server = "src.nemo_openai_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
