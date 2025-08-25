@@ -13,7 +13,7 @@ This repository provides an OpenAI-compatible ASR (Automatic Speech Recognition)
 ## Prerequisites
 
 - Python 3.8 or higher
-- Conda (recommended for environment management)
+- [uv](https://docs.astral.sh/uv/) (recommended for environment management)
 - CUDA-compatible GPU (optional, for GPU acceleration)
 
 ## Installation
@@ -26,14 +26,16 @@ This repository provides an OpenAI-compatible ASR (Automatic Speech Recognition)
 
 2. Create a virtual environment (recommended):
    ```bash
-   conda create -n nemo-asr python=3.10
-   conda activate nemo-asr
+   uv venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
 3. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   uv pip install -r requirements.txt
    ```
+
+See [uv setup documentation](docs/uv_setup.md) for more detailed instructions on using uv with this project.
 
 ## Configuration
 

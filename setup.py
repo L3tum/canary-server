@@ -6,6 +6,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
 with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh.readlines() if line.strip() and not line.startswith("#")]
 
+# Add uv as an optional dependency for development
+extras_require = {
+    "dev": ["uv>=0.4.0"],
+}
+
 setup(
     name="nemo-openai-asr-server",
     version="1.0.0",
@@ -31,6 +36,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=requirements,
+    extras_require=extras_require,
     entry_points={
         "console_scripts": [
             "nemo-asr-server=src.nemo_openai_server:app",

@@ -16,7 +16,7 @@ help:
 
 # Install dependencies
 install:
-	pip install -r requirements.txt
+	uv pip install -r requirements.txt
 
 # Run the server
 run:
@@ -35,4 +35,4 @@ clean:
 
 # Install in development mode
 develop:
-	pip install -e .
+	uv pip install -e .

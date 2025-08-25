@@ -14,9 +14,9 @@ export INTERNAL_API_KEY=${INTERNAL_API_KEY:-"your-api-key-here"}
 
 echo "Using model: $MODEL_NAME"
 
-# Activate conda environment
-echo "Activating conda environment..."
-conda activate env-nemo-asr
+# Activate virtual environment
+echo "Activating virtual environment..."
+source .venv/bin/activate
 
 # Start the server
 echo "Starting NeMo OpenAI-compatible API server..."

@@ -35,6 +35,11 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+dev = [
+    "uv>=0.4.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/nvidia/nemo-openai-asr-server"
 Repository = "https://github.com/nvidia/nemo-openai-asr-server"

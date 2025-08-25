@@ -15,22 +15,20 @@ echo "==> Installing node exporter and basic tools..."
 sudo apt -y install prometheus-node-exporter curl gnupg2 lsb-release
 sudo systemctl enable prometheus-node-exporter || true
 
-# Create conda environment and install dependencies
-echo "==> Setting up conda environment..."
+# Install Python dependencies with uv
+echo "==> Setting up Python environment with uv..."
 timer() { date +%s; }
 elapsed() { echo "$(( $(timer) - $1 ))"; }
 t0=$(timer)
 
-# Create/activate conda environment
-echo "Creating conda environment 'env-nemo-asr'..."
-conda activate env-nemo-asr 2>/dev/null || {
-  conda create -n env-nemo-asr python=3.10 -y
-  conda activate env-nemo-asr
-}
+# Create virtual environment and install dependencies
+echo "Creating virtual environment with uv..."
+uv venv
+source .venv/bin/activate
 
 # Install Python dependencies
-echo "Installing Python packages..."
-pip install -U "nemo_toolkit[asr]" fastapi uvicorn prometheus-client python-multipart aiofiles soundfile
+echo "Installing Python packages with uv..."
+uv pip install -U "nemo_toolkit[asr]" fastapi uvicorn prometheus-client python-multipart aiofiles soundfile
 
 echo "Setup took $(elapsed $t0) seconds."
 

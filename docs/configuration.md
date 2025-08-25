@@ -4,10 +4,30 @@
 
 ```bash
 # Using environment variables
-export INTERNAL_API_KEY=\"your-secret-api-key\"
-export MODEL_NAME=\"nvidia/canary-1b-v2\"
+export INTERNAL_API_KEY="your-secret-api-key"
+export MODEL_NAME="nvidia/canary-1b-v2"
 python -m src.nemo_openai_server
 ```
+
+## Using uv for Dependency Management
+
+This project supports [uv](https://docs.astral.sh/uv/) as an alternative to conda for managing dependencies. To set up the environment with uv:
+
+```bash
+# Create virtual environment
+uv venv
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Run the server
+python -m src.nemo_openai_server
+```
+
+See [uv setup documentation](uv_setup.md) for more detailed instructions.
 
 ## Parallel Processing Configuration
 

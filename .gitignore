@@ -136,3 +136,8 @@ Thumbs.db
 
 # Conda
 conda-meta/
+
+# uv
+.venv/
+uv.lock
+requirements-uv.lock
