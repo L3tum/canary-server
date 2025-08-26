@@ -21,7 +21,10 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 import soundfile as sf
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 class QueuedRequest(NamedTuple):
@@ -32,24 +35,39 @@ class QueuedRequest(NamedTuple):
     future: asyncio.Future
 
 class QueueManager:
-    def __init__(self, models, max_batch_size=4, max_batch_delay_ms=25, disable_batching=False):
+    def __init__(self, models, max_batch_size=4, max_batch_delay_ms=25, disable_batching=False, use_round_robin=False):
         self.queues = {}  # model -> asyncio.Queue
         self.processors = {}  # model -> asyncio.Task
         self.models = models  # Dictionary of model instances
+        self.use_round_robin = use_round_robin
+        self.round_robin_lock = asyncio.Lock()
+        self.round_robin_index = 0
+        self.model_keys = list(models.keys())
         self.max_batch_size = max_batch_size
         self.max_batch_delay_ms = max_batch_delay_ms
         self.disable_batching = disable_batching
+        
+        # Pre-create queues and start processor tasks for all models
+        for model_key in self.model_keys:
+            self.queues[model_key] = asyncio.Queue()
+            self.processors[model_key] = asyncio.create_task(self.process_queue(model_key))
+            logger.info(f"Initialized queue for model: {model_key}")
     
     async def process_queue(self, model: str):
         queue = self.queues[model]
         model_instance = self.models[model]
+        logger.info(f"Started queue processor for model: {model}")
+        
         while True:
             try:
                 # Get the first request
                 req = await queue.get()
                 if req is None:  # shutdown signal
+                    logger.info(f"Shutdown signal received for model: {model}")
                     queue.task_done()
                     break
+                
+                logger.debug(f"Processing request for model: {model}")
                 
                 if self.disable_batching:
                     # Process single request (backward compatibility)
@@ -185,15 +203,58 @@ class QueueManager:
         
         return await asyncio.to_thread(_sync_process_batch)
     
+    async def select_model(self, available_models):
+        """Select a model using either round-robin or queue-size heuristic"""
+        if self.use_round_robin:
+            async with self.round_robin_lock:
+                if not available_models:
+                    raise ValueError("No available models")
+                selected_model = available_models[self.round_robin_index % len(available_models)]
+                self.round_robin_index += 1
+                logger.debug(f"Round-robin selected model: {selected_model}")
+                return selected_model
+        else:
+            # Use queue-size heuristic (no ephemeral Queue creation)
+            selected_model = min(available_models, key=lambda m: self.queues[m].qsize())
+            logger.debug(f"Queue-size heuristic selected model: {selected_model} (queue size: {self.queues[selected_model].qsize()})")
+            return selected_model
+    
     async def enqueue(self, model: str, tmpname: str, source_lang: str, target_lang: str):
-        if model not in self.queues:
-            self.queues[model] = asyncio.Queue()
-            self.processors[model] = asyncio.create_task(self.process_queue(model))
+        # Guard future creation with get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.get_running_loop()
+        future = loop.create_future()
         
-        future = asyncio.Future()
         req = QueuedRequest(model, tmpname, source_lang, target_lang, future)
+        queue_size_before = self.queues[model].qsize()
         await self.queues[model].put(req)
+        
+        logger.info(f"Enqueued request for model {model}, queue size before: {queue_size_before}")
         return await future
+    
+    async def shutdown(self):
+        """Gracefully shutdown all queues and processors"""
+        logger.info("Shutting down queue manager...")
+        
+        # Send shutdown signals to all queues
+        for model_key in self.model_keys:
+            if model_key in self.queues:
+                await self.queues[model_key].put(None)
+        
+        # Cancel all processor tasks
+        for model_key in self.model_keys:
+            if model_key in self.processors:
+                task = self.processors[model_key]
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+        
+        logger.info("Queue manager shutdown complete")
 
 # Lazy import NeMo model to avoid heavy import on module load if not needed
 def load_model(model_name: str, device=None):
@@ -209,6 +270,7 @@ parser.add_argument("--port", type=int, default=8000)
 parser.add_argument("--api-key", default=os.environ.get("INTERNAL_API_KEY"))
 parser.add_argument("--model", default=os.environ.get("MODEL_NAME"))
 parser.add_argument("--parallel-size", type=int, default=1, help="Number of parallel model instances")
+parser.add_argument("--round-robin", action="store_true", help="Use round-robin model selection instead of queue-size heuristic")
 parser.add_argument("--max-batch-size", type=int, default=4, help="Maximum number of audio requests per batch per model instance")
 parser.add_argument("--max-batch-delay-ms", type=int, default=25, help="Maximum waiting time after first item (in milliseconds) to accumulate a batch")
 parser.add_argument("--disable-batching", action="store_true", help="Disable batching and fall back to per-request behavior")
@@ -230,38 +292,48 @@ async def lifespan(app: FastAPI):
     # Get available GPUs
     num_gpus = torch.cuda.device_count()
     if num_gpus == 0:
-        print("No GPUs found, loading model on CPU")
+        logger.info("No GPUs found, loading model on CPU")
         # Load single model on CPU
         app.state.models[args.model] = load_model(args.model)
         app.state.model_names.append(args.model)
+        logger.info(f"Loaded model {args.model} on CPU")
     else:
+        logger.info(f"Found {num_gpus} GPU(s), loading {args.parallel_size} model instances")
         # Distribute models across available GPUs
         for i in range(args.parallel_size):
             gpu_id = i % num_gpus
             device = torch.device(f"cuda:{gpu_id}")
             model_key = f"{args.model}_gpu{gpu_id}_instance{i}"
-            print(f"Loading model instance {i} on {device}")
+            logger.info(f"Loading model instance {i} on {device}")
             app.state.models[model_key] = load_model(args.model, device)
             app.state.model_names.append(model_key)
+            logger.info(f"Successfully loaded model {model_key} on device {device}")
     
     # Initialize queue manager with models and batching config
     app.state.queue_manager = QueueManager(
         app.state.models, 
         max_batch_size=args.max_batch_size,
         max_batch_delay_ms=args.max_batch_delay_ms,
-        disable_batching=args.disable_batching
+        disable_batching=args.disable_batching,
+        use_round_robin=args.round_robin
     )
+    logger.info(f"Initialized queue manager with {len(app.state.models)} models, round_robin={args.round_robin}")
     
     try:
         yield
     finally:
         try:
+            # Gracefully shutdown queue manager
+            if hasattr(app.state, 'queue_manager'):
+                await app.state.queue_manager.shutdown()
+            
             # attempt to free model references on shutdown
             del app.state.models
             del app.state.model_names
             del app.state.queue_manager
-        except Exception:
-            pass
+            logger.info("Cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
 
 app = FastAPI(title="NeMo OpenAI-compatible ASR", lifespan=lifespan)
 
@@ -312,7 +384,7 @@ async def transcribe(
     
     model_name = model or args.model
     
-    # Select a model instance (round-robin or default to first available)
+    # Select a model instance (round-robin or queue-size based)
     available_models = app.state.model_names
     if not available_models:
         raise HTTPException(status_code=500, detail="No models available")
@@ -322,12 +394,17 @@ async def transcribe(
         selected_model = model
     # If requesting the base model name, select one of the instances
     elif model == args.model or not model:
-        # Simple round-robin selection based on queue sizes
-        selected_model = min(available_models, key=lambda m: app.state.queue_manager.queues.get(m, asyncio.Queue()).qsize())
+        # Use the new selection logic (no ephemeral Queue creation)
+        selected_model = await app.state.queue_manager.select_model(available_models)
     else:
         raise HTTPException(status_code=400, detail=f"Model {model} not found")
 
-    tmpfd, tmpname = tempfile.mkstemp(suffix=os.path.splitext(file.filename)[1] or ".wav")
+    # Fix temp file suffix fallback to ensure it works if filename is missing
+    file_suffix = ".wav"
+    if hasattr(file, 'filename') and file.filename:
+        file_suffix = os.path.splitext(file.filename)[1] or ".wav"
+    
+    tmpfd, tmpname = tempfile.mkstemp(suffix=file_suffix)
     with os.fdopen(tmpfd, "wb") as f:
         f.write(await file.read())
 
@@ -339,6 +416,7 @@ async def transcribe(
         REQUESTS.labels(endpoint='/v1/audio/transcriptions', status='200').inc()
         return JSONResponse(content=resp)
     except Exception as e:
+        logger.error(f"Error in transcribe endpoint: {e}")
         REQUESTS.labels(endpoint='/v1/audio/transcriptions', status='500').inc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
