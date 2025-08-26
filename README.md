@@ -7,6 +7,7 @@ This repository provides an OpenAI-compatible ASR (Automatic Speech Recognition)
 - OpenAI-compatible API endpoints
 - Support for NVIDIA's Canary ASR models
 - GPU-parallel inference support
+- CPU optimization for handling CPU-bound preprocessing tasks
 - Prometheus metrics collection
 - Health check endpoint
 
@@ -70,6 +71,21 @@ python -m src.nemo_openai_server --parallel-size 4
 
 See [Parallel Processing Documentation](docs/parallel_processing.md) for more details.
 
+### CPU Optimization
+
+To address CPU contention bottlenecks when using multiple GPU instances, the server now implements several CPU optimization techniques:
+
+1. **Dedicated Thread Pool**: A dedicated thread pool is used for CPU-bound operations like audio preprocessing and model transcription. This prevents these operations from blocking the main asyncio event loop.
+
+2. **Thread Pool Sizing**: By default, the thread pool size is set to the number of CPU cores. You can adjust this with the `--thread-pool-size` argument:
+   ```bash
+   python -m src.nemo_openai_server --thread-pool-size 16
+   ```
+
+3. **CPU Affinity (Advanced)**: For specialized deployments, you can control CPU affinity of worker threads to optimize cache locality and reduce context switching.
+
+See [CPU Optimization Documentation](docs/cpu_optimization.md) for more details.
+
 ## Running the Server
 
 Start the server with:
@@ -83,6 +99,11 @@ export INTERNAL_API_KEY="your-secret-api-key"
 export MODEL_NAME="nvidia/canary-1b-v2"
 export PARALLEL_SIZE=2
 python -m src.nemo_openai_server
+```
+
+For optimized CPU usage with multiple GPUs:
+```bash
+python -m src.nemo_openai_server --parallel-size 2 --thread-pool-size 8
 ```
 
 The server will be available at `http://localhost:8000` with the following endpoints:

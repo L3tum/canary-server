@@ -4,12 +4,15 @@
 HOST ?= 0.0.0.0
 PORT ?= 8000
 API_KEY ?= your-api-key-here
+PARALLEL_SIZE ?= 1
+THREAD_POOL_SIZE ?=
 
 # Help target
 help:
 	@echo "Available targets:"
 	@echo "  install     - Install dependencies"
 	@echo "  run         - Run the ASR server"
+	@echo "  run-cpu-opt - Run the ASR server with CPU optimizations"
 	@echo "  test        - Test the ASR endpoint"
 	@echo "  clean       - Clean Python cache files"
 	@echo "  help        - Show this help message"
@@ -20,7 +23,11 @@ install:
 
 # Run the server
 run:
-	INTERNAL_API_KEY=$(API_KEY) python -m src.nemo_openai_server --host $(HOST) --port $(PORT)
+	INTERNAL_API_KEY=$(API_KEY) python -m src.nemo_openai_server --host $(HOST) --port $(PORT) --parallel-size $(PARALLEL_SIZE)
+
+# Run the server with CPU optimizations
+run-cpu-opt:
+	INTERNAL_API_KEY=$(API_KEY) python -m src.nemo_openai_server --host $(HOST) --port $(PORT) --parallel-size $(PARALLEL_SIZE) --thread-pool-size $(THREAD_POOL_SIZE)
 
 # Test the endpoint
 test:

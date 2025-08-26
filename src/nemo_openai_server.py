@@ -11,6 +11,7 @@ import tempfile
 import argparse
 import time
 import asyncio
+import concurrent.futures
 import torch
 import logging
 from contextlib import asynccontextmanager
@@ -36,7 +37,7 @@ class QueuedRequest(NamedTuple):
     future: asyncio.Future
 
 class QueueManager:
-    def __init__(self, models, use_round_robin=False, max_batch_size=16, max_wait_ms=50):
+    def __init__(self, models, use_round_robin=False, max_batch_size=64, max_wait_ms=50, thread_pool_size=None):
         self.queues = {}  # model -> asyncio.Queue
         self.processors = {}  # model -> asyncio.Task
         self.models = models  # Dictionary of model instances
@@ -46,6 +47,13 @@ class QueueManager:
         self.model_keys = list(models.keys())
         self.max_batch_size = max_batch_size
         self.max_wait_ms = max_wait_ms
+        
+        # Create a dedicated thread pool for CPU-bound operations
+        # Default to number of CPU cores if not specified
+        if thread_pool_size is None:
+            thread_pool_size = os.cpu_count() or 4
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=thread_pool_size)
+        logger.info(f"Created thread pool with {thread_pool_size} workers")
         
         # Pre-create queues and start processor tasks for all models
         for model_key in self.model_keys:
@@ -105,13 +113,16 @@ class QueueManager:
 
             logger.info(f"Processing batch of size {len(batch)} for model {batch[0].model}")
 
-            # Offload blocking transcribe() call to thread
+            # Offload blocking transcribe() call to our dedicated thread pool
             transcribe_kwargs = {"source_lang": source_lang, "target_lang": target_lang}
-            outputs = await asyncio.to_thread(
-                model_instance.transcribe,
-                tmpnames,
-                batch_size=len(batch),
-                **transcribe_kwargs
+            loop = asyncio.get_event_loop()
+            outputs = await loop.run_in_executor(
+                self.thread_pool,
+                lambda: model_instance.transcribe(
+                    tmpnames,
+                    batch_size=len(batch),
+                    **transcribe_kwargs
+                )
             )
 
             for i, req in enumerate(batch):
@@ -189,6 +200,8 @@ class QueueManager:
                     except asyncio.CancelledError:
                         pass
         
+        # Shutdown the thread pool
+        self.thread_pool.shutdown(wait=True)
         logger.info("Queue manager shutdown complete")
 
 # Lazy import NeMo model to avoid heavy import on module load if not needed
@@ -206,6 +219,8 @@ parser.add_argument("--parallel-size", type=int, default=1, help="Number of para
 parser.add_argument("--round-robin", action="store_true", help="Use round-robin model selection instead of queue-size heuristic")
 parser.add_argument("--max-batch-size", type=int, default=64, help="Maximum batch size for transcription")
 parser.add_argument("--max-wait-ms", type=int, default=30, help="Maximum wait time in milliseconds for batching")
+parser.add_argument("--thread-pool-size", type=int, default=None, help="Size of thread pool for CPU-bound operations (default: number of CPU cores)")
+parser.add_argument("--disable-cpu-affinity", action="store_true", help="Disable CPU affinity binding for worker threads")
 args = parser.parse_args()
 
 if not args.api_key:
@@ -268,7 +283,8 @@ async def lifespan(app: FastAPI):
         app.state.models, 
         use_round_robin=args.round_robin,
         max_batch_size=args.max_batch_size,
-        max_wait_ms=args.max_wait_ms
+        max_wait_ms=args.max_wait_ms,
+        thread_pool_size=args.thread_pool_size
     )
     logger.info(f"Initialized queue manager with {len(app.state.models)} models, round_robin={args.round_robin}")
     
