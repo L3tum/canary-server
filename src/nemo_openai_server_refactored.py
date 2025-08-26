@@ -184,38 +184,38 @@ class GlobalBatchManager:
     async def _process_gpu_batch(self, batch: List[QueuedRequest], model_instance, gpu_id):
         """Process a batch of requests on a specific GPU"""
         try:
-            # Write audio data to temporary files in memory
-            temp_files = []
             source_langs = [req.source_lang for req in batch]
             target_langs = [req.target_lang for req in batch]
-            
+
             # For now, we assume all requests in a batch have the same source and target language
-            # A more robust implementation might group requests by language
             source_lang = source_langs[0]
             target_lang = target_langs[0]
-            
+
             logger.info(f"Processing batch of size {len(batch)} on GPU {gpu_id}")
-            
-            # Create temporary files in memory
+
+            # Convert audio data to numpy arrays in memory, avoiding disk I/O
+            audio_samples = []
             for req in batch:
-                temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                temp_file.write(req.audio_data)
-                temp_file.flush()
-                temp_files.append(temp_file.name)
-            
+                with BytesIO(req.audio_data) as bio:
+                    # soundfile.read returns a numpy array and the sample rate
+                    samples, _ = sf.read(bio, dtype='float32')
+                    audio_samples.append(samples)
+
             try:
                 # Offload blocking transcribe() call to our dedicated thread pool
                 transcribe_kwargs = {"source_lang": source_lang, "target_lang": target_lang}
                 loop = asyncio.get_event_loop()
+
+                # Pass audio data as numpy arrays directly to the transcribe method
                 outputs = await loop.run_in_executor(
                     self.thread_pool,
                     lambda: model_instance.transcribe(
-                        temp_files,
+                        audio_samples,
                         batch_size=len(batch),
                         **transcribe_kwargs
                     )
                 )
-                
+
                 # Set results for all requests
                 for i, req in enumerate(batch):
                     try:
@@ -233,13 +233,9 @@ class GlobalBatchManager:
                         if not req.future.done():
                             req.future.set_exception(e)
             finally:
-                # Clean up temporary files
-                for temp_file in temp_files:
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
-                        
+                # No temporary files to clean up
+                pass
+
         except Exception as e:
             logger.error(f"Error in _process_gpu_batch on GPU {gpu_id}: {e}")
             for req in batch:
@@ -363,24 +359,20 @@ async def lifespan(app: FastAPI):
 
     # Warm up models
     logger.info("Warming up models...")
-    # Create a dummy silent audio file for warmup
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
-        samplerate = 16000
-        duration = 0.1  # 100ms
-        data = (np.zeros(int(samplerate * duration)) * 32767).astype(np.int16)
-        sf.write(tmpfile.name, data, samplerate)
-        dummy_audio_path = tmpfile.name
+    # Create a dummy silent audio array for warmup
+    samplerate = 16000
+    duration = 0.1  # 100ms
+    dummy_audio_data = np.zeros(int(samplerate * duration), dtype=np.float32)
 
     for model_key, model_instance in app.state.models.items():
         logger.info(f"Warming up {model_key}...")
         try:
-            model_instance.transcribe([dummy_audio_path], batch_size=1)
+            # Pass numpy array directly
+            model_instance.transcribe([dummy_audio_data], batch_size=1)
             logger.info(f"Successfully warmed up {model_key}")
         except Exception as e:
             logger.error(f"Error warming up {model_key}: {e}")
     
-    # Clean up the dummy audio file
-    os.remove(dummy_audio_path)
     logger.info("Model warmup complete.")
 
     # Initialize global batch manager with models
