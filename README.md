@@ -118,3 +118,67 @@ sudo systemctl enable prometheus-node-exporter
 ## License
 
 This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+
+## Batching and Throughput Optimization
+
+The server supports request batching to improve GPU utilization and overall throughput when processing multiple audio requests concurrently. This feature batches multiple queued requests per model instance into a single NeMo transcribe() call when possible.
+
+### Batching Configuration
+
+Batching can be configured using the following command line arguments:
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--max-batch-size` | Maximum number of audio requests per batch per model instance | `4` |
+| `--max-batch-delay-ms` | Maximum waiting time after first item (in milliseconds) to accumulate a batch | `25` |
+| `--disable-batching` | Disable batching and fall back to per-request behavior | `false` |
+
+### Example Usage
+
+Enable batching with custom settings:
+```bash
+python -m src.nemo_openai_server \
+  --api-key your-secret-api-key \
+  --parallel-size 2 \
+  --max-batch-size 8 \
+  --max-batch-delay-ms 50
+```
+
+Disable batching for latency-sensitive applications:
+```bash
+python -m src.nemo_openai_server \
+  --api-key your-secret-api-key \
+  --disable-batching
+```
+
+### Batching Behavior
+
+- **Language Matching**: Only requests with matching `source_lang` and `target_lang` are batched together
+- **Time Limits**: Batches are processed when either `max_batch_size` is reached or `max_batch_delay_ms` has elapsed since the first request
+- **Fairness**: Requests with different language pairs are re-queued fairly and not skipped
+- **Response Format**: Individual responses include additional `batch_size` and `batch_position` fields
+
+### Performance Trade-offs
+
+**Throughput vs Latency:**
+- **Higher batch sizes** (8-16): Better GPU utilization and throughput, but higher latency for individual requests
+- **Lower batch sizes** (2-4): Better latency with moderate throughput improvement
+- **Shorter delays** (10-25ms): Lower latency impact when queue is not full
+- **Longer delays** (50-100ms): Better batching efficiency but higher minimum latency
+
+### Tuning Recommendations
+
+1. **High-throughput scenarios**: Use `--max-batch-size 8` or higher with `--max-batch-delay-ms 50-100`
+2. **Latency-sensitive applications**: Use `--max-batch-size 2-4` with `--max-batch-delay-ms 10-25`
+3. **Mixed workloads**: Start with defaults (`--max-batch-size 4 --max-batch-delay-ms 25`) and adjust based on monitoring
+4. **Real-time applications**: Consider `--disable-batching` if latency is more critical than throughput
+
+### Monitoring
+
+Batch information is logged at INFO level:
+```
+Processing batch: model=nvidia/canary-1b-v2_gpu0_instance0, batch_size=4, queue_remaining=2, source_lang=en, target_lang=en
+Batch completed: model=nvidia/canary-1b-v2_gpu0_instance0, batch_size=4, latency=0.245s
+```
+
+Use these logs to tune batching parameters based on your workload characteristics.

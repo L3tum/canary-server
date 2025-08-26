@@ -12,12 +12,17 @@ import argparse
 import time
 import asyncio
 import torch
+import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, NamedTuple
 from fastapi import FastAPI, File, UploadFile, Form, Header, HTTPException, Request, Path
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 import soundfile as sf
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class QueuedRequest(NamedTuple):
     model: str
@@ -27,34 +32,158 @@ class QueuedRequest(NamedTuple):
     future: asyncio.Future
 
 class QueueManager:
-    def __init__(self, models):
+    def __init__(self, models, max_batch_size=4, max_batch_delay_ms=25, disable_batching=False):
         self.queues = {}  # model -> asyncio.Queue
         self.processors = {}  # model -> asyncio.Task
         self.models = models  # Dictionary of model instances
+        self.max_batch_size = max_batch_size
+        self.max_batch_delay_ms = max_batch_delay_ms
+        self.disable_batching = disable_batching
     
     async def process_queue(self, model: str):
         queue = self.queues[model]
         model_instance = self.models[model]
         while True:
             try:
+                # Get the first request
                 req = await queue.get()
                 if req is None:  # shutdown signal
+                    queue.task_done()
                     break
-                result = await self._process_request(req, model_instance)
-                req.future.set_result(result)
+                
+                if self.disable_batching:
+                    # Process single request (backward compatibility)
+                    try:
+                        result = await self._process_request(req, model_instance)
+                        req.future.set_result(result)
+                    except Exception as e:
+                        if not req.future.done():
+                            req.future.set_exception(e)
+                    finally:
+                        queue.task_done()
+                else:
+                    # Batching logic
+                    batch_requests = [req]
+                    dequeued_count = 1  # Track how many items we've dequeued
+                    start_time = time.time()
+                    
+                    # Try to accumulate more requests for batching
+                    while (len(batch_requests) < self.max_batch_size and 
+                           (time.time() - start_time) * 1000 < self.max_batch_delay_ms):
+                        try:
+                            # Use a very short timeout to check for additional requests
+                            next_req = await asyncio.wait_for(queue.get(), timeout=0.001)
+                            dequeued_count += 1
+                            
+                            if next_req is None:  # shutdown signal
+                                # Put it back and break
+                                await queue.put(next_req)
+                                dequeued_count -= 1  # We put it back, so don't count it
+                                break
+                            
+                            # Check if languages match for batching
+                            if (next_req.source_lang == req.source_lang and 
+                                next_req.target_lang == req.target_lang):
+                                batch_requests.append(next_req)
+                            else:
+                                # Language mismatch, put it back for later processing
+                                await queue.put(next_req)
+                                dequeued_count -= 1  # We put it back, so don't count it
+                                break
+                        except asyncio.TimeoutError:
+                            # No more requests available, proceed with current batch
+                            break
+                    
+                    # Process the batch
+                    batch_size = len(batch_requests)
+                    queue_remaining = queue.qsize()
+                    
+                    logger.info(f"Processing batch: model={model}, batch_size={batch_size}, "
+                              f"queue_remaining={queue_remaining}, source_lang={req.source_lang}, "
+                              f"target_lang={req.target_lang}")
+                    
+                    batch_start_time = time.time()
+                    try:
+                        result = await self._process_batch(batch_requests, model_instance)
+                        batch_latency = time.time() - batch_start_time
+                        
+                        logger.info(f"Batch completed: model={model}, batch_size={batch_size}, "
+                                  f"latency={batch_latency:.3f}s")
+                        
+                        # Set results for all requests in the batch
+                        for i, batch_req in enumerate(batch_requests):
+                            individual_result = result[i].copy()
+                            individual_result["batch_size"] = batch_size
+                            individual_result["batch_position"] = i
+                            batch_req.future.set_result(individual_result)
+                            
+                    except Exception as e:
+                        # Set exception for all requests in the batch
+                        for batch_req in batch_requests:
+                            if not batch_req.future.done():
+                                batch_req.future.set_exception(e)
+                    finally:
+                        # Call task_done for each request we actually processed
+                        for _ in range(len(batch_requests)):
+                            queue.task_done()
+                            
             except Exception as e:
-                if not req.future.done():
-                    req.future.set_exception(e)
+                logger.error(f"Unexpected error in process_queue: {e}")
+                # For any unexpected error, we still need to call task_done() for the original request
+                try:
+                    if not req.future.done():
+                        req.future.set_exception(e)
+                    queue.task_done()
+                except:
+                    pass
     
     async def _process_request(self, req: QueuedRequest, model_instance):
-        audio_info = sf.info(req.tmpname)
-        # return duration in seconds (audio_info.duration is in seconds)
-        duration_seconds = audio_info.duration
-        transcribe_kwargs = {"source_lang": req.source_lang, "target_lang": req.target_lang}
-        outputs = model_instance.transcribe([req.tmpname], **transcribe_kwargs)
-        text = outputs[0].text if outputs else ""
-        return {"text": text, "model": req.model, "source_lang": req.source_lang,
-                "target_lang": req.target_lang, "duration": duration_seconds}
+        # Single request processing (used when batching is disabled)
+        def _sync_process_single():
+            audio_info = sf.info(req.tmpname)
+            duration_seconds = audio_info.duration
+            transcribe_kwargs = {"source_lang": req.source_lang, "target_lang": req.target_lang}
+            outputs = model_instance.transcribe([req.tmpname], **transcribe_kwargs)
+            text = outputs[0].text if outputs else ""
+            return {"text": text, "model": req.model, "source_lang": req.source_lang,
+                    "target_lang": req.target_lang, "duration": duration_seconds}
+        
+        return await asyncio.to_thread(_sync_process_single)
+    
+    async def _process_batch(self, batch_requests: List[QueuedRequest], model_instance):
+        # Batch processing with thread offload
+        def _sync_process_batch():
+            # Get duration for each file
+            file_paths = []
+            durations = []
+            for req in batch_requests:
+                audio_info = sf.info(req.tmpname)
+                durations.append(audio_info.duration)
+                file_paths.append(req.tmpname)
+            
+            # Use the language settings from the first request (all should match)
+            first_req = batch_requests[0]
+            transcribe_kwargs = {"source_lang": first_req.source_lang, "target_lang": first_req.target_lang}
+            
+            # Call transcribe with batch of files
+            outputs = model_instance.transcribe(file_paths, **transcribe_kwargs)
+            
+            # Prepare individual results
+            results = []
+            for i, req in enumerate(batch_requests):
+                text = outputs[i].text if i < len(outputs) and outputs[i] else ""
+                result = {
+                    "text": text,
+                    "model": req.model,
+                    "source_lang": req.source_lang,
+                    "target_lang": req.target_lang,
+                    "duration": durations[i]
+                }
+                results.append(result)
+            
+            return results
+        
+        return await asyncio.to_thread(_sync_process_batch)
     
     async def enqueue(self, model: str, tmpname: str, source_lang: str, target_lang: str):
         if model not in self.queues:
@@ -80,6 +209,9 @@ parser.add_argument("--port", type=int, default=8000)
 parser.add_argument("--api-key", default=os.environ.get("INTERNAL_API_KEY"))
 parser.add_argument("--model", default=os.environ.get("MODEL_NAME"))
 parser.add_argument("--parallel-size", type=int, default=1, help="Number of parallel model instances")
+parser.add_argument("--max-batch-size", type=int, default=4, help="Maximum number of audio requests per batch per model instance")
+parser.add_argument("--max-batch-delay-ms", type=int, default=25, help="Maximum waiting time after first item (in milliseconds) to accumulate a batch")
+parser.add_argument("--disable-batching", action="store_true", help="Disable batching and fall back to per-request behavior")
 args = parser.parse_args()
 
 if not args.api_key:
@@ -112,8 +244,13 @@ async def lifespan(app: FastAPI):
             app.state.models[model_key] = load_model(args.model, device)
             app.state.model_names.append(model_key)
     
-    # Initialize queue manager with models
-    app.state.queue_manager = QueueManager(app.state.models)
+    # Initialize queue manager with models and batching config
+    app.state.queue_manager = QueueManager(
+        app.state.models, 
+        max_batch_size=args.max_batch_size,
+        max_batch_delay_ms=args.max_batch_delay_ms,
+        disable_batching=args.disable_batching
+    )
     
     try:
         yield
