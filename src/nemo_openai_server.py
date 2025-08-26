@@ -19,6 +19,7 @@ from fastapi import FastAPI, File, UploadFile, Form, Header, HTTPException, Requ
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter
 import soundfile as sf
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -35,7 +36,7 @@ class QueuedRequest(NamedTuple):
     future: asyncio.Future
 
 class QueueManager:
-    def __init__(self, models, use_round_robin=False):
+    def __init__(self, models, use_round_robin=False, max_batch_size=16, max_wait_ms=50):
         self.queues = {}  # model -> asyncio.Queue
         self.processors = {}  # model -> asyncio.Task
         self.models = models  # Dictionary of model instances
@@ -43,6 +44,8 @@ class QueueManager:
         self.round_robin_lock = asyncio.Lock()
         self.round_robin_index = 0
         self.model_keys = list(models.keys())
+        self.max_batch_size = max_batch_size
+        self.max_wait_ms = max_wait_ms
         
         # Pre-create queues and start processor tasks for all models
         for model_key in self.model_keys:
@@ -54,48 +57,86 @@ class QueueManager:
         queue = self.queues[model]
         model_instance = self.models[model]
         logger.info(f"Started queue processor for model: {model}")
-        
+
         while True:
+            batch = []
             try:
-                req = await queue.get()
-                if req is None:  # shutdown signal
+                # Wait for the first request with a timeout
+                first_req = await asyncio.wait_for(queue.get(), self.max_wait_ms / 1000.0)
+                if first_req is None:  # Shutdown signal
                     logger.info(f"Shutdown signal received for model: {model}")
                     break
-                    
-                logger.debug(f"Processing request for model: {model}")
-                result = await self._process_request(req, model_instance)
-                req.future.set_result(result)
-                queue.task_done()
+                batch.append(first_req)
+
+                # Fill the rest of the batch without waiting
+                while len(batch) < self.max_batch_size and not queue.empty():
+                    try:
+                        req = queue.get_nowait()
+                        if req is None:
+                            # If we get a shutdown signal, process the current batch and then exit
+                            if batch:
+                                await self._process_batch(batch, model_instance)
+                            logger.info(f"Shutdown signal received for model: {model}")
+                            return  # Exit the processing loop
+                        batch.append(req)
+                    except asyncio.QueueEmpty:
+                        break
+                
+                # Process the batch
+                if batch:
+                    await self._process_batch(batch, model_instance)
+
+            except asyncio.TimeoutError:
+                # This is expected if the queue is empty for max_wait_ms
+                pass
             except Exception as e:
-                logger.error(f"Error processing request for model {model}: {e}")
-                if not req.future.done():
-                    req.future.set_exception(e)
-    
-    async def _process_request(self, req: QueuedRequest, model_instance):
+                logger.error(f"Error in process_queue for model {model}: {e}")
+
+    async def _process_batch(self, batch: List[QueuedRequest], model_instance):
         try:
-            # Keep duration computation in async path
-            audio_info = sf.info(req.tmpname)
-            duration_seconds = audio_info.duration
-            
+            tmpnames = [req.tmpname for req in batch]
+            source_langs = [req.source_lang for req in batch]
+            target_langs = [req.target_lang for req in batch]
+
+            # For now, we assume all requests in a batch have the same source and target language
+            # A more robust implementation might group requests by language
+            source_lang = source_langs[0]
+            target_lang = target_langs[0]
+
+            logger.info(f"Processing batch of size {len(batch)} for model {batch[0].model}")
+
             # Offload blocking transcribe() call to thread
-            transcribe_kwargs = {"source_lang": req.source_lang, "target_lang": req.target_lang}
+            transcribe_kwargs = {"source_lang": source_lang, "target_lang": target_lang}
             outputs = await asyncio.to_thread(
-                model_instance.transcribe, 
-                [req.tmpname], 
+                model_instance.transcribe,
+                tmpnames,
+                batch_size=len(batch),
                 **transcribe_kwargs
             )
-            
-            text = outputs[0].text if outputs else ""
-            return {
-                "text": text, 
-                "model": req.model, 
-                "source_lang": req.source_lang,
-                "target_lang": req.target_lang, 
-                "duration": duration_seconds
-            }
+
+            for i, req in enumerate(batch):
+                try:
+                    audio_info = sf.info(req.tmpname)
+                    duration_seconds = audio_info.duration
+                    text = outputs[i].text if i < len(outputs) else ""
+                    result = {
+                        "text": text,
+                        "model": req.model,
+                        "source_lang": req.source_lang,
+                        "target_lang": req.target_lang,
+                        "duration": duration_seconds
+                    }
+                    req.future.set_result(result)
+                except Exception as e:
+                    logger.error(f"Error processing individual request in batch: {e}")
+                    if not req.future.done():
+                        req.future.set_exception(e)
+
         except Exception as e:
-            logger.error(f"Error in _process_request: {e}")
-            raise
+            logger.error(f"Error in _process_batch: {e}")
+            for req in batch:
+                if not req.future.done():
+                    req.future.set_exception(e)
     
     async def select_model(self, available_models):
         """Select a model using either round-robin or queue-size heuristic"""
@@ -153,9 +194,7 @@ class QueueManager:
 # Lazy import NeMo model to avoid heavy import on module load if not needed
 def load_model(model_name: str, device=None):
     from nemo.collections.asr.models import ASRModel
-    model = ASRModel.from_pretrained(model_name=model_name)
-    if device:
-        model = model.to(device)
+    model = ASRModel.from_pretrained(model_name=model_name, map_location=device)
     return model
 
 parser = argparse.ArgumentParser()
@@ -165,6 +204,8 @@ parser.add_argument("--api-key", default=os.environ.get("INTERNAL_API_KEY"))
 parser.add_argument("--model", default=os.environ.get("MODEL_NAME"))
 parser.add_argument("--parallel-size", type=int, default=1, help="Number of parallel model instances")
 parser.add_argument("--round-robin", action="store_true", help="Use round-robin model selection instead of queue-size heuristic")
+parser.add_argument("--max-batch-size", type=int, default=64, help="Maximum batch size for transcription")
+parser.add_argument("--max-wait-ms", type=int, default=30, help="Maximum wait time in milliseconds for batching")
 args = parser.parse_args()
 
 if not args.api_key:
@@ -199,9 +240,36 @@ async def lifespan(app: FastAPI):
             app.state.models[model_key] = load_model(args.model, device)
             app.state.model_names.append(model_key)
             logger.info(f"Successfully loaded model {model_key} on device {device}")
+
+    # Warm up models
+    logger.info("Warming up models...")
+    # Create a dummy silent audio file for warmup
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
+        samplerate = 16000
+        duration = 0.1  # 100ms
+        data = (np.zeros(int(samplerate * duration)) * 32767).astype(np.int16)
+        sf.write(tmpfile.name, data, samplerate)
+        dummy_audio_path = tmpfile.name
+
+    for model_key, model_instance in app.state.models.items():
+        logger.info(f"Warming up {model_key}...")
+        try:
+            model_instance.transcribe([dummy_audio_path], batch_size=1)
+            logger.info(f"Successfully warmed up {model_key}")
+        except Exception as e:
+            logger.error(f"Error warming up {model_key}: {e}")
     
+    # Clean up the dummy audio file
+    os.remove(dummy_audio_path)
+    logger.info("Model warmup complete.")
+
     # Initialize queue manager with models and round-robin setting
-    app.state.queue_manager = QueueManager(app.state.models, use_round_robin=args.round_robin)
+    app.state.queue_manager = QueueManager(
+        app.state.models, 
+        use_round_robin=args.round_robin,
+        max_batch_size=args.max_batch_size,
+        max_wait_ms=args.max_wait_ms
+    )
     logger.info(f"Initialized queue manager with {len(app.state.models)} models, round_robin={args.round_robin}")
     
     try:
