@@ -29,9 +29,13 @@ run:
 run-cpu-opt:
 	INTERNAL_API_KEY=$(API_KEY) python -m src.nemo_openai_server --host $(HOST) --port $(PORT) --parallel-size $(PARALLEL_SIZE) --thread-pool-size $(THREAD_POOL_SIZE)
 
-# Test the endpoint
-test:
+# Test the endpoint (legacy)
+test-endpoint:
 	python tests/test_endpoint.py --api-key $(API_KEY) --host $(HOST) --port $(PORT)
+
+# Run all pytest tests
+test:
+	python -m pytest tests -v --tb=short
 
 # Clean Python cache files
 clean:
@@ -43,3 +47,19 @@ clean:
 # Install in development mode
 develop:
 	uv pip install -e .
+
+# Lint code with ruff
+lint:
+	python -m ruff check src/ tests/
+
+# Auto-format with ruff
+format:
+	python -m ruff format src/ tests/
+
+# Start development server with hot reload
+dev:
+	INTERNAL_API_KEY=$(API_KEY) MODEL_NAME=$(MODEL_NAME) python -m uvicorn src.nemo_openai_server:app --host $(HOST) --port $(PORT) --reload
+
+# Build Docker image
+docker-build:
+	docker build -t canary-asr-server .

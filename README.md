@@ -1,143 +1,271 @@
 # NVIDIA Canary ASR Endpoint
 
-This repository provides an OpenAI-compatible ASR (Automatic Speech Recognition) endpoint using NVIDIA's Canary 1B v2 model through the NeMo toolkit.
+OpenAI-compatible ASR (Automatic Speech Recognition) server powered by NVIDIA's Canary 1B v2 model through NeMo toolkit. Production-ready with global batch processing, GPU parallelism, JSON logging, and comprehensive monitoring.
 
-## Features
+## Quick Start
 
-- OpenAI-compatible API endpoints
-- Support for NVIDIA's Canary ASR models
-- GPU-parallel inference support
-- CPU optimization for handling CPU-bound preprocessing tasks
-- Prometheus metrics collection
-- Health check endpoint
+```bash
+# Clone and setup
+git clone https://github.com/.../canary-server.git
+cd canary-server
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
 
-## Prerequisites
+# Run the server
+INTERNAL_API_KEY="your-secret-key" MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server
+```
 
-- Python 3.8 or higher
-- [uv](https://docs.astral.sh/uv/) (recommended for environment management)
-- CUDA-compatible GPU (optional, for GPU acceleration)
+## API Documentation
 
-## Installation
+The server provides an OpenAI-compatible API with the following endpoints:
 
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd nemo_openai_server
-   ```
+### Authentication
 
-2. Create a virtual environment (recommended):
-   ```bash
-   uv venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+All endpoints except `/metrics` and `/healthz` require a Bearer token:
 
-3. Install dependencies:
-   ```bash
-   uv pip install -r requirements.txt
-   ```
+```
+Authorization: Bearer YOUR_API_KEY
+```
 
-See [uv setup documentation](docs/uv_setup.md) for more detailed instructions on using uv with this project.
+Set the `INTERNAL_API_KEY` environment variable when starting the server.
+
+### Endpoints
+
+#### POST `/v1/audio/transcriptions`
+
+Transcribe audio files to text.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/v1/audio/transcriptions \
+  -H "Authorization: Bearer your-api-key" \
+  -F "model=nvidia/canary-1b-v2" \
+  -F "file=@audio.wav" \
+  -F "source_lang=en" \
+  -F "target_lang=en"
+```
+
+**Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `model` | string | No | Model ID (default: server's model) |
+| `file` | file | Yes | Audio file (wav, mp3, etc.) |
+| `source_lang` | string | No | Source language code (default: "en") |
+| `target_lang` | string | No | Target language code (default: "en") |
+
+**Response (200 OK):**
+```json
+{
+  "text": "Transcribed text here",
+  "model": "nvidia/canary-1b-v2",
+  "source_lang": "en",
+  "target_lang": "en",
+  "duration": 5.2
+}
+```
+
+**Error Codes:**
+| Code | Error | Description |
+|------|-------|-------------|
+| 400 | Bad Request | Invalid audio file, unsupported format, invalid language |
+| 401 | Unauthorized | Missing or invalid API key |
+| 413 | Payload Too Large | File exceeds 500MB limit |
+| 429 | Too Many Requests | Rate limit exceeded |
+| 500 | Internal Server Error | No models loaded or processing error |
+
+**Rate Limiting:**
+Default: 30 requests per minute per IP address. Adjust with `--rate-limit` or `RATE_LIMIT` (for example, `100/minute`).
+
+#### GET `/v1/models`
+
+List available models.
+
+```bash
+curl -H "Authorization: Bearer your-api-key" http://localhost:8000/v1/models
+```
+
+**Response:**
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "nvidia/canary-1b-v2",
+      "object": "model",
+      "created": 1690000000,
+      "owned_by": "nvidia"
+    }
+  ]
+}
+```
+
+#### GET `/health`
+
+Health check with GPU status and memory usage.
+
+```bash
+curl -H "Authorization: Bearer your-api-key" http://localhost:8000/health
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "request_id": "req-abc123",
+  "ready": true,
+  "models_loaded": 1,
+  "gpu_count": 1,
+  "gpu_info": {},
+  "queue_depth": 0,
+  "cuda_available": true
+}
+```
+
+#### GET `/healthz`
+
+Readiness check for Docker and load balancers (no auth required). Returns `200 OK` when the server is ready and `503` while models are loading.
+
+#### GET `/metrics`
+
+Prometheus metrics (no auth required). Returns metrics including:
+- `nemo_requests_total` — total request count
+- `nemo_request_duration_seconds` — request latency histogram
+- `nemo_queue_depth` — current queue depth
+- `nemo_batch_size` — batch size distribution
+- `nemo_model_loaded` — model status
+
+### OpenAPI / Swagger UI
+
+Interactive API documentation available at:
+```
+http://localhost:8000/docs
+```
+
+Or the raw OpenAPI schema at:
+```
+http://localhost:8000/openapi.json
+```
+
+## Architecture
+
+The server uses an **in-memory global batch manager** with per-GPU workers for maximum throughput:
+
+1. **Request ingestion**: Incoming requests are queued in memory (no temp files).
+2. **Batch formation**: GlobalBatchManager collects requests and forms optimal batches.
+3. **GPU distribution**: Batches are distributed round-robin across GPU workers.
+4. **Parallel processing**: Multiple requests processed simultaneously on different GPUs.
+5. **Result aggregation**: Results returned to original requesters.
+
+### Key Features
+
+- **No temp files**: Audio data processed entirely in memory
+- **Global batching**: Efficient batch sizes regardless of GPU assignment
+- **Per-GPU workers**: Dedicated async workers per GPU
+- **FP16 inference**: Optional mixed-precision for faster inference
+- **torch.compile**: Optional JIT compilation for performance
+- **Structured JSON logging**: Each request gets a unique trace ID
+- **Rate limiting**: Protects against abuse via slowapi
+- **Input validation**: Audio format, file size (500MB limit), language codes
 
 ## Configuration
 
-The server can be configured using environment variables:
+### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `INTERNAL_API_KEY` | API key for authentication (required) | `your-api-key-here` |
-| `MODEL_NAME` | The model to use | `nvidia/canary-1b-v2` |
+| `INTERNAL_API_KEY` | API key (required) | `your-api-key-here` |
+| `MODEL_NAME` | Model identifier | `nvidia/canary-1b-v2` |
 | `MODEL_TYPE` | Model type | `audio` |
 | `MODEL_TASK` | Model task | `speech_to_text` |
-| `PARALLEL_SIZE` | Number of parallel model instances | `1` |
-| `HOST` | Server host | `0.0.0.0` |
+| `PARALLEL_SIZE` | Parallel model instances | `1` |
+| `HOST` | Server bind address | `0.0.0.0` |
 | `PORT` | Server port | `8000` |
+| `RATE_LIMIT` | Per-IP transcription rate limit | `30/minute` |
+| `MAX_BATCH_SIZE` | Maximum transcription batch size | `64` |
+| `MAX_WAIT_MS` | Maximum wait time for batching | `30` |
+| `THREAD_POOL_SIZE` | CPU worker thread pool size | CPU cores |
+| `USE_FP16` | Enable FP16 when set to `true` | `false` |
+| `USE_TORCH_COMPILE` | Enable `torch.compile` when set to `true` | `false` |
 
-### Parallel Processing
+### Command-Line Arguments
 
-The server supports parallel processing by loading multiple instances of the same model across available GPUs. This feature improves throughput by allowing simultaneous transcription requests to be processed on different GPU devices.
+| Flag | Description |
+|------|-------------|
+| `--host` | Server host (0.0.0.0) |
+| `--port` | Server port (8000) |
+| `--api-key` | API key (overrides env) |
+| `--model` | Model name (overrides env) |
+| `--parallel-size` | Number of model instances |
+| `--max-batch-size` | Max batch size (64) |
+| `--max-wait-ms` | Max wait time for batching (30ms) |
+| `--thread-pool-size` | CPU thread pool (auto) |
+| `--rate-limit` | Per-IP transcription rate limit (30/minute) |
+| `--use-fp16` | Use FP16 precision |
+| `--use-torch-compile` | Enable torch.compile |
 
-To enable parallel processing, set the `PARALLEL_SIZE` environment variable or use the `--parallel-size` command line argument:
+### Supported Languages
 
+The server supports over 40 languages. Full list:
+`en, es, fr, de, it, pt, zh, ja, ko, ru, ar, hi, th, vi, tr, pl, nl, sv, fi, da, no, el, he, cs, sk, hu, ro, bg, hr, sr, sl, et, lv, lt, uk, fa, id, ms, sw, tl`
+
+Plus `auto` for automatic language detection (source_lang only).
+
+## Docker Deployment
+
+### Docker Compose (with monitoring)
 ```bash
-export PARALLEL_SIZE=4
-python -m src.nemo_openai_server
+# Build and run with Prometheus + Grafana
+docker compose up --build
+
+# Services:
+# - ASR server (port 8000)
+# - Prometheus (port 9090)
+# - Grafana (port 3000)
 ```
 
-or
+See [Dockerfile](Dockerfile) for the container build.
 
+### Custom Docker Image
 ```bash
-python -m src.nemo_openai_server --parallel-size 4
+docker build -t canary-asr-server .
+docker run -p 8000:8000 \
+  -e INTERNAL_API_KEY="your-key" \
+  -e MODEL_NAME="nvidia/canary-1b-v2" \
+  -e PARALLEL_SIZE=2 \
+  --gpus all \
+  canary-asr-server
 ```
 
-See [Parallel Processing Documentation](docs/parallel_processing.md) for more details.
+## Testing & Quality
 
-### CPU Optimization
-
-To address CPU contention bottlenecks when using multiple GPU instances, the server now implements several CPU optimization techniques:
-
-1. **Dedicated Thread Pool**: A dedicated thread pool is used for CPU-bound operations like audio preprocessing and model transcription. This prevents these operations from blocking the main asyncio event loop.
-
-2. **Thread Pool Sizing**: By default, the thread pool size is set to the number of CPU cores. You can adjust this with the `--thread-pool-size` argument:
-   ```bash
-   python -m src.nemo_openai_server --thread-pool-size 16
-   ```
-
-3. **CPU Affinity (Advanced)**: For specialized deployments, you can control CPU affinity of worker threads to optimize cache locality and reduce context switching.
-
-See [CPU Optimization Documentation](docs/cpu_optimization.md) for more details.
-
-## Running the Server
-
-Start the server with:
+### Run Tests
 ```bash
-python -m src.nemo_openai_server --api-key your-secret-api-key
+make test
 ```
 
-Or with environment variables:
+### Linting
 ```bash
-export INTERNAL_API_KEY="your-secret-api-key"
-export MODEL_NAME="nvidia/canary-1b-v2"
-export PARALLEL_SIZE=2
-python -m src.nemo_openai_server
+make lint
 ```
 
-For optimized CPU usage with multiple GPUs:
+### Pre-commit Hooks
 ```bash
-python -m src.nemo_openai_server --parallel-size 2 --thread-pool-size 8
+pip install pre-commit
+pre-commit install
 ```
 
-The server will be available at `http://localhost:8000` with the following endpoints:
-- `/health` - Health check endpoint
-- `/metrics` - Prometheus metrics
-- `/v1/audio/transcriptions` - ASR transcription endpoint (OpenAI-compatible)
-- `/v1/models` - Model listing endpoint (OpenAI-compatible)
-
-## Usage
-
-To transcribe an audio file:
+### Load Testing
 ```bash
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
-  -H "Authorization: Bearer your-api-key-here" \
-  -F "model=nvidia/canary-1b-v2" \
-  -F "file=@your_audio_file.wav"
+python tests/benchmark.py --host localhost --port 8000 --files path/to/audio.wav
 ```
 
-## Testing
+## Documentation
 
-Run the health check:
-```bash
-curl -v http://localhost:8000/health \
-  -H "Authorization: Bearer your-api-key-here"
-```
-
-## Metrics
-
-Prometheus metrics are available at `/metrics` endpoint. To enable system metrics collection, install and run Prometheus node exporter:
-```bash
-sudo apt install prometheus-node-exporter
-sudo systemctl enable prometheus-node-exporter
-```
+- [Parallel Processing Guide](docs/parallel_processing.md)
+- [CPU Optimization Guide](docs/cpu_optimization.md)
+- [Operational Runbook](docs/runbook.md) — scaling, monitoring, model updates
+- [uv Setup Guide](docs/uv_setup.md)
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
+Apache License 2.0

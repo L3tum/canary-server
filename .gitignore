@@ -141,3 +141,8 @@ conda-meta/
 .venv/
 uv.lock
 requirements-uv.lock
+
+# Docker and application data
+data/
+*.tar
+*.img

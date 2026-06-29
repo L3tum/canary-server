@@ -6,9 +6,10 @@ services:
     image: nemo-asr-server
     container_name: nemo-asr-server
     environment:
-      - INTERNAL_API_KEY=your-secret-api-key
-      - MODEL_NAME=nvidia/canary-1b-v2
-      - PARALLEL_SIZE=2
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-your-secret-api-key}
+      - MODEL_NAME=${MODEL_NAME:-nvidia/canary-1b-v2}
+      - PARALLEL_SIZE=${PARALLEL_SIZE:-2}
+      - RATE_LIMIT=${RATE_LIMIT:-30/minute}
       - MODEL_TYPE=audio
       - MODEL_TASK=speech_to_text
     ports:
@@ -23,11 +24,11 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 120s
     restart: unless-stopped
 
   prometheus:

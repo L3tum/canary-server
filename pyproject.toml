@@ -28,6 +28,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "prometheus-client>=0.17.0",
+    "slowapi>=0.1.8",
     "python-multipart>=0.0.6",
     "aiofiles>=23.0.0",
     "soundfile>=0.12.0",
@@ -38,6 +39,16 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dev = [
     "uv>=0.4.0",
+    "ruff>=0.1.0",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "aiohttp>=3.9.0",
+    "requests>=2.31.0",
+    "respx>=0.20.0",
+    "slowapi>=0.1.8",
+    "pre-commit>=3.5.0",
+    "python-multipart>=0.0.6",
 ]
 
 [project.urls]
@@ -52,3 +63,21 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 120
+exclude = [".git", ".venv", "__pycache__", "dist", "build"]
+
+[tool.ruff.lint]
+# Enable pycodestyle (E), isort (I), flake8-bugbear (B), flake8-simplify (SIM)
+select = ["E", "F", "I", "B", "SIM", "C4", "UP"]
+ignore = [
+    "E501",  # line too long (we have line-length setting, but ruff uses E501 for enforcement)
+    "B006",  # Do not use mutable data structures for argument defaults
+    "B008",  # Do not perform function call in argument defaults (FastAPI standard pattern)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+force-single-line = false
