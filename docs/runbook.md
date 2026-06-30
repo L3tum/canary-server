@@ -24,10 +24,11 @@ MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server --host 0.0.0.0
 
 ### Health check
 ```bash
-# If API key is configured:
-curl -H "Authorization: Bearer your-key" http://localhost:8000/health
-# Without authentication:
+# Simple liveness check (no auth):
 curl http://localhost:8000/health
+
+# Detailed health with GPU status (requires auth if API key configured):
+curl -H "Authorization: Bearer your-key" http://localhost:8000/healthz
 ```
 
 Expected response includes `{"status":"ok","ready":true,"models_loaded":...}` plus GPU and queue details.
@@ -96,9 +97,9 @@ For high-traffic deployments, run multiple server instances behind a load balanc
    docker compose up -d
    ```
 
-4. Verify with health check:
+4. Verify with detailed health check:
    ```bash
-   curl -H "Authorization: Bearer your-key" http://localhost:8000/health
+   curl -H "Authorization: Bearer your-key" http://localhost:8000/healthz
    ```
 
 ### Switching to a Different Model
@@ -115,6 +116,11 @@ For high-traffic deployments, run multiple server instances behind a load balanc
 4. Verify with health check:
    ```bash
    curl http://localhost:8000/health
+   ```
+
+   For detailed GPU status (if API key configured):
+   ```bash
+   curl -H "Authorization: Bearer your-key" http://localhost:8000/healthz
    ```
 
 ## Monitoring
@@ -158,7 +164,7 @@ All logs are in JSON format with `request_id` for tracing:
 
 ### Server is unresponsive
 
-1. Check readiness endpoint: `curl http://localhost:8000/healthz`
+1. Check liveness endpoint: `curl http://localhost:8000/health`
 2. If GPU memory is full, kill the process and restart
 3. Check logs for error patterns: `docker compose logs asr-server`
 4. Restart: `docker compose restart asr-server`

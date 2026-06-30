@@ -193,10 +193,19 @@ def _available_models() -> List[str]:
     return sorted([n for n in names if n])
 
 @app.get("/health")
-async def health(authorization: str = Header(None)):
+async def health():
+    """Simple liveness check (no auth required). Returns 503 if models not loaded."""
+    if not getattr(app.state, "model_names", None) or len(app.state.model_names) == 0:
+        raise HTTPException(status_code=503, detail="Models not loaded")
+    return {"status": "ok"}
+
+
+@app.get("/healthz")
+async def healthz(authorization: str = Header(None)):
+    """Detailed health check with auth."""
     if args.api_key and authorization != f"Bearer {args.api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return {"status":"ok"}
+    return {"status": "ok"}
 
 @app.get("/metrics")
 async def metrics():

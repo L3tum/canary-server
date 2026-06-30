@@ -31,9 +31,9 @@ RUN mkdir -p /models
 # Expose port
 EXPOSE 8000
 
-# Health check (no auth required, uses /healthz endpoint)
+# Health check (no auth required, uses /health endpoint)
 HEALTHCHECK --interval=30s --timeout=30s --start-period=120s --retries=3 \
-    CMD curl -f http://localhost:8000/healthz || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command
 CMD ["python", "-m", "src.nemo_openai_server"]

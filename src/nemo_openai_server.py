@@ -676,16 +676,16 @@ async def add_request_id(request: Request, call_next):
 # --- Endpoints ---
 
 
-@app.get("/healthz")
-async def healthz():
+@app.get("/health")
+async def health():
     """Simple health check for monitoring (no auth required). Returns 503 if models not ready."""
     if not getattr(app.state, "ready", False):
         raise HTTPException(status_code=503, detail="Service starting, models not loaded")
     return {"status": "ok"}
 
 
-@app.get("/health")
-async def health(
+@app.get("/healthz")
+async def healthz(
     authorization: str = Header(None),
     request: Request = None,
 ):

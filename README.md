@@ -23,7 +23,7 @@ The server provides an OpenAI-compatible API with the following endpoints:
 
 ### Authentication
 
-When an `INTERNAL_API_KEY` is configured, endpoints (except `/metrics` and `/healthz`) require a Bearer token:
+When an `INTERNAL_API_KEY` is configured, endpoints (except `/metrics` and `/health`) require a Bearer token:
 
 ```
 Authorization: Bearer YOUR_API_KEY
@@ -103,10 +103,14 @@ curl -H "Authorization: Bearer your-api-key" http://localhost:8000/v1/models
 
 #### GET `/health`
 
-Health check with GPU status and memory usage.
+Simple liveness check (no auth required). Returns `200 OK` when the server is ready and `503` while models are loading.
+
+#### GET `/healthz`
+
+Detailed health check with GPU status and memory usage. Requires authentication if an API key is configured.
 
 ```bash
-curl -H "Authorization: Bearer your-api-key" http://localhost:8000/health
+curl -H "Authorization: Bearer your-api-key" http://localhost:8000/healthz
 ```
 
 **Response:**
@@ -122,10 +126,6 @@ curl -H "Authorization: Bearer your-api-key" http://localhost:8000/health
   "cuda_available": true
 }
 ```
-
-#### GET `/healthz`
-
-Readiness check for Docker and load balancers (no auth required). Returns `200 OK` when the server is ready and `503` while models are loading.
 
 #### GET `/metrics`
 
