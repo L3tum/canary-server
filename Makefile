@@ -3,7 +3,7 @@
 # Default variables
 HOST ?= 0.0.0.0
 PORT ?= 8000
-API_KEY ?= your-api-key-here
+API_KEY ?=  # optional, omit for no authentication
 PARALLEL_SIZE ?= 1
 THREAD_POOL_SIZE ?=
 

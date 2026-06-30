@@ -25,7 +25,9 @@ async def transcribe_file(session, url, api_key, file_path, model=None):
         if model:
             data.add_field("model", model)
 
-        headers = {"Authorization": f"Bearer {api_key}"}
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         start_time = time.time()
         async with session.post(url, data=data, headers=headers) as resp:
@@ -111,7 +113,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test CPU optimization improvements")
     parser.add_argument("--host", default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8000, help="Server port")
-    parser.add_argument("--api-key", required=True, help="API key for authentication")
+    parser.add_argument("--api-key", default=os.environ.get("INTERNAL_API_KEY"), help="API key for authentication (optional)")
     parser.add_argument("--file", required=True, help="Audio file to transcribe")
     parser.add_argument("--concurrent", type=int, default=5, help="Concurrent requests")
     parser.add_argument("--total", type=int, default=20, help="Total requests")

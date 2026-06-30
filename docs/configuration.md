@@ -3,7 +3,7 @@
 ## Basic Configuration
 
 ```bash
-# Using environment variables
+# Using environment variables (API key is optional but recommended)
 export INTERNAL_API_KEY="your-secret-api-key"
 export MODEL_NAME="nvidia/canary-1b-v2"
 python -m src.nemo_openai_server
@@ -32,7 +32,7 @@ See [uv setup documentation](uv_setup.md) for more detailed instructions.
 ## Parallel Processing Configuration
 
 ```bash
-# Load 4 parallel instances across available GPUs
+# Load 4 parallel instances across available GPUs (API key optional)
 export INTERNAL_API_KEY=\"your-secret-api-key\"
 export MODEL_NAME=\"nvidia/canary-1b-v2\"
 export PARALLEL_SIZE=4
@@ -42,7 +42,7 @@ python -m src.nemo_openai_server
 ## Custom Host and Port
 
 ```bash
-# Run on specific host and port
+# Run on specific host and port (API key optional)
 export INTERNAL_API_KEY=\"your-secret-api-key\"
 python -m src.nemo_openai_server --host 127.0.0.1 --port 9000
 ```
@@ -53,7 +53,7 @@ python -m src.nemo_openai_server --host 127.0.0.1 --port 9000
 #!/bin/bash
 # complete_config.sh
 
-# Server configuration
+# Server configuration (API key is optional)
 export INTERNAL_API_KEY=\"your-secret-api-key\"
 export MODEL_NAME=\"nvidia/canary-1b-v2\"
 export MODEL_TYPE=\"audio\"
@@ -68,7 +68,7 @@ python -m src.nemo_openai_server
 
 ## Docker Configuration
 
-When running in Docker, you can pass environment variables:
+When running in Docker, you can pass environment variables (API key optional):
 
 ```bash
 docker run -e INTERNAL_API_KEY=\"your-secret-api-key\" \\
@@ -86,6 +86,7 @@ services:
   asr-server:
     image: nemo-asr-server
     environment:
+      # API key is optional (omit for no auth)
       - INTERNAL_API_KEY=your-secret-api-key
       - MODEL_NAME=nvidia/canary-1b-v2
       - PARALLEL_SIZE=4

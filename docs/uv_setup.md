@@ -46,6 +46,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 After setting up the environment, you can run the server as usual:
 ```bash
+# Without authentication (for local/dev):
+python -m src.nemo_openai_server
+# With authentication (recommended for production):
 python -m src.nemo_openai_server --api-key your-secret-api-key
 ```
 

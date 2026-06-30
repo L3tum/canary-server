@@ -24,7 +24,6 @@ RUN uv pip install --system --no-cache-dir -r requirements.txt
 # Copy application code
 COPY src/ ./src/
 COPY docs/ ./docs/
-COPY tests/ ./tests/
 
 # Create model cache directory (writable by the container user)
 RUN mkdir -p /models

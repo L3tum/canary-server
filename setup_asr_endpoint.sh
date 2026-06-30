@@ -116,8 +116,15 @@ parser.add_argument("--model", default=os.environ.get("MODEL_NAME"))
 parser.add_argument("--parallel-size", type=int, default=1, help="Number of parallel model instances")
 args = parser.parse_args()
 
+import logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
 if not args.api_key:
-    raise RuntimeError("INTERNAL_API_KEY must be provided via env or --api-key")
+    logger.warning(
+        "No API key configured – all endpoints are unauthenticated. "
+        "Set INTERNAL_API_KEY for production security."
+    )
 
 # metrics
 REQUESTS = Counter('nemo_requests_total', 'Total number of requests', ['endpoint', 'status'])
@@ -163,7 +170,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NeMo OpenAI-compatible ASR", lifespan=lifespan)
 
 def _check_auth(authorization: str):
-    if authorization != f"Bearer {args.api_key}":
+    """Check authorization header. If no API key is configured, skip auth."""
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 def _model_obj(name: str) -> Dict:
@@ -186,7 +194,7 @@ def _available_models() -> List[str]:
 
 @app.get("/health")
 async def health(authorization: str = Header(None)):
-    if authorization != f"Bearer {args.api_key}":
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
     return {"status":"ok"}
 
@@ -203,7 +211,7 @@ async def transcribe(
     target_lang: str = Form("es"),
     authorization: str = Header(None),
 ):
-    if authorization != f"Bearer {args.api_key}":
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         REQUESTS.labels(endpoint='/v1/audio/transcriptions', status='401').inc()
         raise HTTPException(status_code=401, detail="Unauthorized")
     

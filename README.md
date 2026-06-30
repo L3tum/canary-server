@@ -11,8 +11,10 @@ cd canary-server
 uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
 
-# Run the server
+# Run the server (API key is optional but recommended for security)
 INTERNAL_API_KEY="your-secret-key" MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server
+# Or without authentication for local/dev use:
+# MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server
 ```
 
 ## API Documentation
@@ -21,13 +23,13 @@ The server provides an OpenAI-compatible API with the following endpoints:
 
 ### Authentication
 
-All endpoints except `/metrics` and `/healthz` require a Bearer token:
+When an `INTERNAL_API_KEY` is configured, endpoints (except `/metrics` and `/healthz`) require a Bearer token:
 
 ```
 Authorization: Bearer YOUR_API_KEY
 ```
 
-Set the `INTERNAL_API_KEY` environment variable when starting the server.
+If no API key is set, the server runs without authentication. **For production use, we strongly recommend setting `INTERNAL_API_KEY`.**
 
 ### Endpoints
 
@@ -68,7 +70,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 | Code | Error | Description |
 |------|-------|-------------|
 | 400 | Bad Request | Invalid audio file, unsupported format, invalid language |
-| 401 | Unauthorized | Missing or invalid API key |
+| 401 | Unauthorized | Missing or invalid API key (only if API key is configured) |
 | 413 | Payload Too Large | File exceeds 500MB limit |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | No models loaded or processing error |
@@ -173,7 +175,7 @@ The server uses an **in-memory global batch manager** with per-GPU workers for m
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `INTERNAL_API_KEY` | API key (required) | `your-api-key-here` |
+| `INTERNAL_API_KEY` | API key (recommended for security) | `your-api-key-here` |
 | `MODEL_NAME` | Model identifier | `nvidia/canary-1b-v2` |
 | `MODEL_TYPE` | Model type | `audio` |
 | `MODEL_TASK` | Model task | `speech_to_text` |

@@ -99,7 +99,10 @@ To test the effectiveness of CPU optimizations:
 Example load test command:
 ```bash
 # Using hey (https://github.com/rakyll/hey)
+# With authentication (if API key configured):
 hey -z 30s -c 10 -H "Authorization: Bearer your-api-key" \
+# Without authentication:
+# hey -z 30s -c 10 \
   -F "file=@test.wav" \
   -F "model=nvidia/canary-1b-v2" \
   http://localhost:8000/v1/audio/transcriptions

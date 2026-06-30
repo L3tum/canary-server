@@ -17,13 +17,17 @@ docker compose up -d
 
 ### Start manually
 ```bash
-INTERNAL_API_KEY="your-key" MODEL_NAME="nvidia/canary-1b-v2" \
-python -m src.nemo_openai_server --host 0.0.0.0 --port 8000
+MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server --host 0.0.0.0 --port 8000
+# With authentication (recommended for production):
+# INTERNAL_API_KEY="your-key" MODEL_NAME="nvidia/canary-1b-v2" python -m src.nemo_openai_server
 ```
 
 ### Health check
 ```bash
+# If API key is configured:
 curl -H "Authorization: Bearer your-key" http://localhost:8000/health
+# Without authentication:
+curl http://localhost:8000/health
 ```
 
 Expected response includes `{"status":"ok","ready":true,"models_loaded":...}` plus GPU and queue details.
@@ -108,6 +112,10 @@ For high-traffic deployments, run multiple server instances behind a load balanc
    ```bash
    MODEL_NAME="new-model-name" docker compose up -d
    ```
+4. Verify with health check:
+   ```bash
+   curl http://localhost:8000/health
+   ```
 
 ## Monitoring
 
@@ -188,8 +196,9 @@ Adjust rate limiting in the code or add rate limiting exceptions for trusted IPs
 
 ### Authentication failures
 
-- Verify `INTERNAL_API_KEY` is set correctly
+- If an API key is configured, verify `INTERNAL_API_KEY` is set correctly
 - Check that `Authorization: Bearer <key>` is included in requests
+- If no API key is configured, the server runs without authentication (401 errors should not occur)
 
 ### Pre-commit hooks failing
 

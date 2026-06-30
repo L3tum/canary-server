@@ -10,7 +10,8 @@ echo "Starting ASR endpoint..."
 export MODEL_NAME=${MODEL_NAME:-"nvidia/canary-1b-v2"}
 export MODEL_TYPE=${MODEL_TYPE:-"audio"}
 export MODEL_TASK=${MODEL_TASK:-"speech_to_text"}
-export INTERNAL_API_KEY=${INTERNAL_API_KEY:-"your-api-key-here"}
+# API key is optional (omit for no authentication)
+export INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
 
 echo "Using model: $MODEL_NAME"
 

@@ -12,7 +12,9 @@ import requests
 def test_health_endpoint(api_key, host, port):
     """Test the health endpoint"""
     url = f"http://{host}:{port}/health"
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         response = requests.get(url, headers=headers)
@@ -32,7 +34,9 @@ def test_health_endpoint(api_key, host, port):
 def test_models_endpoint(api_key, host, port):
     """Test the models endpoint"""
     url = f"http://{host}:{port}/v1/models"
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         response = requests.get(url, headers=headers)
@@ -52,7 +56,7 @@ def test_models_endpoint(api_key, host, port):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test ASR endpoint")
     parser.add_argument(
-        "--api-key", default=os.environ.get("INTERNAL_API_KEY", "your-api-key-here"), help="API key for authentication"
+        "--api-key", default=os.environ.get("INTERNAL_API_KEY"), help="API key for authentication (optional, omit for no auth)"
     )
     parser.add_argument("--host", default=os.environ.get("HOST", "localhost"), help="Server host")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Server port")

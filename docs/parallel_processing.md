@@ -17,7 +17,8 @@ Start the server with parallel processing:
 
 ```bash
 python -m src.nemo_openai_server \
-  --api-key your-secret-api-key \
+  # --api-key your-secret-api-key \
+  # (optional, recommended for production)
   --model nvidia/canary-1b-v2 \
   --parallel-size 4 \
   --host 0.0.0.0 \
@@ -31,7 +32,7 @@ This example will load 4 instances of the model distributed across available GPU
 You can also configure parallel processing using environment variables:
 
 ```bash
-export INTERNAL_API_KEY=\"your-secret-api-key\"
+# export INTERNAL_API_KEY=\"your-secret-api-key\"  # optional
 export MODEL_NAME=\"nvidia/canary-1b-v2\"
 export PARALLEL_SIZE=4
 python -m src.nemo_openai_server

@@ -14,7 +14,9 @@ import aiohttp
 
 async def transcribe_file(session: aiohttp.ClientSession, url: str, api_key: str, file_path: str, model: str) -> dict:
     """Transcribe a single audio file"""
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     with open(file_path, "rb") as f:
         data = aiohttp.FormData()
@@ -75,7 +77,7 @@ async def benchmark_parallel_processing(
 def main():
     parser = argparse.ArgumentParser(description="Benchmark parallel processing performance")
     parser.add_argument(
-        "--api-key", default=os.environ.get("INTERNAL_API_KEY", "your-api-key-here"), help="API key for authentication"
+        "--api-key", default=os.environ.get("INTERNAL_API_KEY"), help="API key for authentication (optional, omit for no auth)"
     )
     parser.add_argument("--host", default=os.environ.get("HOST", "localhost"), help="Server host")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Server port")

@@ -528,9 +528,13 @@ def _parse_args():
 
 args = _parse_args()
 
-
 if not args.api_key:
-    raise RuntimeError("INTERNAL_API_KEY must be provided via env or --api-key")
+    logger.warning(
+        "No API key configured – all endpoints are unauthenticated. "
+        "Set INTERNAL_API_KEY for production security."
+    )
+else:
+    logger.info("API key configured – authentication enabled")
 
 
 # --- Lifespan: Load models before serving ---
@@ -622,8 +626,8 @@ app.state.limiter = limiter
 
 
 def _check_auth(authorization: str):
-    """Check authorization header."""
-    if authorization != f"Bearer {args.api_key}":
+    """Check authorization header. If no API key is configured, skip auth."""
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -686,7 +690,7 @@ async def health(
     request: Request = None,
 ):
     """Health check endpoint with detailed GPU status."""
-    if authorization != f"Bearer {args.api_key}":
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     gpu_info = {}
@@ -742,7 +746,7 @@ async def transcribe(
     authorization: str = Header(None),
 ):
     """Transcribe audio file (OpenAI-compatible endpoint)."""
-    if authorization != f"Bearer {args.api_key}":
+    if args.api_key and authorization != f"Bearer {args.api_key}":
         REQUESTS.labels(endpoint="/v1/audio/transcriptions", status="401").inc()
         raise HTTPException(status_code=401, detail="Unauthorized")
 
